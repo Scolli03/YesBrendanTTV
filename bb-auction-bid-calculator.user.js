@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.4.0
+// @version      1.4.1
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -99,6 +99,7 @@
         bidPanelBound: false,
         bidScanTimer: null,
         tabRefreshTimer: null,
+        tabQuietUntil: 0,
         observersPaused: false,
         isPDA: false,
         itemCatalogError: null,
@@ -1510,7 +1511,8 @@
     async function refreshAllRows() {
         if (state.refreshInFlight) return;
         state.refreshInFlight = true;
-        pauseListObservers();
+        const wasPaused = state.observersPaused;
+        if (!wasPaused) pauseListObservers();
         try {
             const rows = Array.from(document.querySelectorAll('ul.items-list > li[id]'));
             log('refresh rows', rows.length);
@@ -1518,7 +1520,9 @@
             scheduleBidPanelScan();
         } finally {
             state.refreshInFlight = false;
-            resumeListObservers();
+            if (!wasPaused && (!state.tabQuietUntil || Date.now() >= state.tabQuietUntil)) {
+                resumeListObservers();
+            }
         }
     }
 
@@ -1534,10 +1538,16 @@
     function scheduleTabRefresh() {
         if (state.tabRefreshTimer) clearTimeout(state.tabRefreshTimer);
         pauseListObservers();
-        state.tabRefreshTimer = setTimeout(() => {
+        state.tabQuietUntil = Date.now() + (state.isPDA ? 4000 : 1500);
+        state.tabRefreshTimer = setTimeout(async () => {
             state.tabRefreshTimer = null;
-            refreshAllRows();
-        }, state.isPDA ? 550 : 350);
+            await refreshAllRows();
+            if (state.isPDA) {
+                setTimeout(resumeListObservers, 2500);
+            } else {
+                resumeListObservers();
+            }
+        }, state.isPDA ? 650 : 350);
     }
 
     // ---------- bid panel ----------
@@ -1873,20 +1883,52 @@
 
     // ---------- observers ----------
 
+    function isScriptNode(node) {
+        if (!node) return true;
+        if (node.nodeType === Node.TEXT_NODE) return !String(node.textContent || '').trim();
+        if (!(node instanceof Element)) return true;
+        if (node.id && node.id.indexOf(PREFIX) === 0) return true;
+        const cn = node.className ? String(node.className) : '';
+        return cn.indexOf(PREFIX + '-') !== -1;
+    }
+
+    function mutationIsScriptOnly(mutation) {
+        if (mutation.type !== 'childList') return false;
+        const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+        if (!nodes.length) return false;
+        return nodes.every(isScriptNode);
+    }
+
+    function isStructuralListChange(mutation) {
+        if (mutation.type !== 'childList') return false;
+        const target = mutation.target;
+        if (!(target instanceof Element)) return false;
+        if (target.matches('ul.items-list')) return true;
+        if (target.matches('ul.items-list > li[id]')) return true;
+        if (target.classList.contains('items-list-wrap')) return true;
+        return false;
+    }
+
     function shouldIgnoreMutation(mutation) {
+        if (mutationIsScriptOnly(mutation)) return true;
         const target = mutation.target;
         if (!(target instanceof Element)) return true;
         if (target.closest('#' + PREFIX + '-overlay')) return true;
         if (target.closest('#' + PREFIX + '-panel')) return true;
         if (target.closest('#' + PREFIX + '-controls')) return true;
+        if (target.closest('.' + PREFIX + '-hint-wrap')) return true;
+        if (target.closest('.' + PREFIX + '-hint')) return true;
+        if (target.closest('.' + PREFIX + '-desk-hint')) return true;
+        if (target.closest('.' + PREFIX + '-mob-hint')) return true;
+        if (target.closest('.' + PREFIX + '-bid-actions')) return true;
         if (target.classList && (
             target.classList.contains(PREFIX + '-hint') ||
             target.classList.contains(PREFIX + '-desk-hint') ||
             target.classList.contains(PREFIX + '-mob-hint') ||
-            target.classList.contains(PREFIX + '-bid-actions')
+            target.classList.contains(PREFIX + '-bid-actions') ||
+            target.classList.contains(PREFIX + '-hint-wrap') ||
+            target.classList.contains(PREFIX + '-seller-hint-anchor')
         )) return true;
-        if (target.closest('.' + PREFIX + '-hint-wrap')) return true;
-        if (target.closest('.' + PREFIX + '-hint') || target.closest('.' + PREFIX + '-desk-hint') || target.closest('.' + PREFIX + '-bid-actions')) return true;
         return false;
     }
 
@@ -1896,13 +1938,14 @@
 
         state.listObserver = new MutationObserver(mutations => {
             if (state.observersPaused) return;
+            if (state.tabQuietUntil && Date.now() < state.tabQuietUntil) return;
             let relevant = false;
             for (const m of mutations) {
                 if (shouldIgnoreMutation(m)) continue;
-                if (m.type === 'childList') {
-                    relevant = true;
-                    break;
-                }
+                if (m.type !== 'childList') continue;
+                if (state.isPDA && !isStructuralListChange(m)) continue;
+                relevant = true;
+                break;
             }
             if (relevant) scheduleRefresh();
         });
@@ -1946,7 +1989,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.4.0', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.4.1', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             state.isPDA = await checkTornPDA();
