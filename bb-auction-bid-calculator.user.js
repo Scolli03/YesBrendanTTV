@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.3.9
+// @version      1.4.0
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -33,6 +33,8 @@
     };
     const UNKNOWN_CATEGORY = '__unknown__';
     const PDA_API_KEY_PLACEHOLDER = '###PDA-APIKEY###';
+    /** Replaced at runtime by Torn PDA when user sets a key in script manager. */
+    let RUNTIME_API_KEY = PDA_API_KEY_PLACEHOLDER;
     const CATALOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
     /** v2 API categories — weapons + armor only (~300 items, 2 requests). Cached 7 days. */
     const CATALOG_V2_CATEGORIES = ['Weapon', 'Defensive'];
@@ -93,6 +95,12 @@
         refreshTimer: null,
         refreshInFlight: false,
         topBarObserver: null,
+        bidPanelObserver: null,
+        bidPanelBound: false,
+        bidScanTimer: null,
+        tabRefreshTimer: null,
+        observersPaused: false,
+        isPDA: false,
         itemCatalogError: null,
         lastApiAt: 0,
         debug: false
@@ -188,6 +196,19 @@
         return !key || String(key).trim() === '' || key === PDA_API_KEY_PLACEHOLDER;
     }
 
+    async function checkTornPDA() {
+        if (typeof window.flutter_inappwebview !== 'undefined' &&
+            typeof window.flutter_inappwebview.callHandler === 'function') {
+            try {
+                const response = await window.flutter_inappwebview.callHandler('isTornPDA');
+                return !!(response && response.isTornPDA === true);
+            } catch (e) {
+                return false;
+            }
+        }
+        return false;
+    }
+
     function getCachedCategory(itemId) {
         const key = String(itemId);
         if (state.itemCatalog[key]) return state.itemCatalog[key];
@@ -197,9 +218,9 @@
     }
 
     function getApiKey() {
+        if (!isPdaApiKeyPlaceholder(RUNTIME_API_KEY)) return String(RUNTIME_API_KEY).trim();
         const stored = storeGet(SK.apiKey, '');
         if (stored && String(stored).trim()) return String(stored).trim();
-        if (!isPdaApiKeyPlaceholder(PDA_API_KEY_PLACEHOLDER)) return PDA_API_KEY_PLACEHOLDER;
         const sharedKeys = ['tornApiKey', 'rwToolkitTornApiKey'];
         try {
             if (typeof GM_getValue !== 'undefined') {
@@ -269,6 +290,9 @@
     }
 
     async function ensureApiKey() {
+        if (state.isPDA) {
+            return getApiKey();
+        }
         const existing = getApiKey();
         if (existing) return existing;
         if (storeGet(SK.apiKeyPrompted, false)) return null;
@@ -848,7 +872,7 @@
         style.textContent = `
             .${PREFIX}-panel{
                 margin:10px 0; padding:12px 14px; position:relative; z-index:2;
-                background:rgba(17,24,39,.55); border:1px solid rgba(255,255,255,.08);
+                background:#1f2937; border:1px solid rgba(255,255,255,.12);
                 border-radius:8px; box-sizing:border-box;
             }
             .${PREFIX}-controls{
@@ -857,21 +881,21 @@
             .${PREFIX}-field{ display:flex; flex-direction:column; gap:4px; min-width:140px; }
             .${PREFIX}-field label{ font-size:11px; color:#9ca3af; text-transform:uppercase; letter-spacing:.3px; }
             .${PREFIX}-money-wrap{
-                display:flex; align-items:center; background:rgba(17,24,39,.75);
-                border:1px solid rgba(168,85,247,.35); border-radius:8px; overflow:hidden;
+                display:flex; align-items:center; background:#111827;
+                border:1px solid rgba(168,85,247,.45); border-radius:8px; overflow:hidden;
             }
             .${PREFIX}-money-wrap span.${PREFIX}-sym{
-                padding:8px 10px; color:#d1d5db; background:rgba(0,0,0,.2); font-weight:700;
+                padding:8px 10px; color:#d1d5db; background:#0f172a; font-weight:700;
             }
             .${PREFIX}-money-wrap input{
-                border:none; background:transparent; color:#f3f4f6; padding:8px 10px;
+                border:none; background:#111827; color:#f3f4f6; padding:8px 10px;
                 min-width:160px; font-size:13px; outline:none; font-variant-numeric:tabular-nums;
             }
             .${PREFIX}-btn{
-                cursor:pointer; border:1px solid rgba(168,85,247,.45); background:rgba(17,24,39,.75);
+                cursor:pointer; border:1px solid rgba(168,85,247,.5); background:#111827;
                 color:#e5e7eb; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600;
             }
-            .${PREFIX}-btn:hover{ border-color:rgba(236,72,153,.55); background:rgba(17,24,39,.9); }
+            .${PREFIX}-btn:hover{ border-color:rgba(236,72,153,.55); background:#1f2937; }
             .${PREFIX}-btn.primary{
                 background:linear-gradient(90deg,rgba(168,85,247,.9),rgba(236,72,153,.85));
                 border-color:rgba(236,72,153,.6); color:#fff;
@@ -935,7 +959,7 @@
             }
             .${PREFIX}-modal-tables{ max-width:min(720px,96vw); }
             .${PREFIX}-modal-narrow{ max-width:min(380px,92vw); }
-            .${PREFIX}-modal-api{ max-width:min(360px,92vw); }
+            .${PREFIX}-modal-api{ max-width:min(360px,92vw); width:100%; }
             .${PREFIX}-modal-head{
                 display:flex; justify-content:space-between; align-items:center; gap:12px;
                 padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.08);
@@ -1435,8 +1459,8 @@
                 const amountEl = inner.querySelector('.' + PREFIX + '-bid-amount');
                 bidWrap.textContent = amountEl ? amountEl.textContent.trim() : inner.textContent.trim();
             }
-            bidWrap.querySelectorAll('.' + PREFIX + '-row-hint').forEach(n => n.remove());
-            bidWrap.classList.remove(PREFIX + '-bid-stack');
+            bidWrap.querySelectorAll('.' + PREFIX + '-row-hint, .' + PREFIX + '-desk-hint').forEach(n => n.remove());
+            bidWrap.classList.remove(PREFIX + '-bid-stack', PREFIX + '-bid-anchor');
         }
         const bidsWrap = li.querySelector('.bids-wrap');
         if (bidsWrap) {
@@ -1444,16 +1468,14 @@
             bidsWrap.classList.remove(PREFIX + '-bids-stack');
         }
         li.querySelectorAll(':scope > .' + PREFIX + '-hint-wrap').forEach(n => n.remove());
-        const sellerWrap = li.querySelector('.seller-wrap');
-        if (sellerWrap) {
-            sellerWrap.querySelectorAll('.' + PREFIX + '-hint-wrap').forEach(n => n.remove());
-            sellerWrap.classList.remove(PREFIX + '-seller-hint-anchor');
-        }
-        li.querySelectorAll(':scope > .' + PREFIX + '-desk-hint').forEach(n => n.remove());
-        if (bidWrap) {
-            bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
-            bidWrap.classList.remove(PREFIX + '-bid-anchor');
-        }
+    }
+
+    function pauseListObservers() {
+        state.observersPaused = true;
+    }
+
+    function resumeListObservers() {
+        state.observersPaused = false;
     }
 
     function cleanupLegacyControls() {
@@ -1463,7 +1485,10 @@
 
     async function refreshRow(li) {
         if (!li.id || li.classList.contains('clear')) return;
-        cleanupLegacyBidWrap(li);
+        if (!li.dataset.bbLegacyCleaned) {
+            cleanupLegacyBidWrap(li);
+            li.dataset.bbLegacyCleaned = '1';
+        }
         const rowInfo = parseAuctionRow(li);
 
         if (!rowInfo.isArmor && rowInfo.itemId && !rowInfo.category) {
@@ -1485,22 +1510,34 @@
     async function refreshAllRows() {
         if (state.refreshInFlight) return;
         state.refreshInFlight = true;
+        pauseListObservers();
         try {
             const rows = Array.from(document.querySelectorAll('ul.items-list > li[id]'));
             log('refresh rows', rows.length);
             await Promise.all(rows.map(li => refreshRow(li)));
-            scanBidPanels();
+            scheduleBidPanelScan();
         } finally {
             state.refreshInFlight = false;
+            resumeListObservers();
         }
     }
 
-    function scheduleRefresh() {
-        if (state.refreshTimer) return;
+    function scheduleRefresh(delayMs) {
+        const delay = delayMs != null ? delayMs : (state.isPDA ? 450 : 200);
+        if (state.refreshTimer) clearTimeout(state.refreshTimer);
         state.refreshTimer = setTimeout(() => {
             state.refreshTimer = null;
             refreshAllRows();
-        }, 200);
+        }, delay);
+    }
+
+    function scheduleTabRefresh() {
+        if (state.tabRefreshTimer) clearTimeout(state.tabRefreshTimer);
+        pauseListObservers();
+        state.tabRefreshTimer = setTimeout(() => {
+            state.tabRefreshTimer = null;
+            refreshAllRows();
+        }, state.isPDA ? 550 : 350);
     }
 
     // ---------- bid panel ----------
@@ -1593,11 +1630,77 @@
         });
     }
 
+    function isBidConfirmOpen(confirmEl) {
+        if (!confirmEl) return false;
+        const li = confirmEl.closest('li');
+        if (li && li.classList.contains('active')) return true;
+        const display = confirmEl.style.display;
+        if (display && display !== 'none') return true;
+        return confirmEl.offsetHeight > 0;
+    }
+
     function scanBidPanels() {
         document.querySelectorAll('ul.items-list > li .confirm.p10').forEach(confirmEl => {
-            if (confirmEl.style.display === 'none') return;
+            if (!isBidConfirmOpen(confirmEl)) return;
             injectBidPanelActions(confirmEl);
         });
+    }
+
+    function scheduleBidPanelScan() {
+        if (state.bidScanTimer) clearTimeout(state.bidScanTimer);
+        state.bidScanTimer = setTimeout(() => {
+            state.bidScanTimer = null;
+            scanBidPanels();
+        }, 60);
+    }
+
+    function observeBidPanels() {
+        const root = document.querySelector('.items-list-wrap') || document.querySelector('ul.items-list');
+        if (!root || state.bidPanelBound) return;
+        state.bidPanelBound = true;
+
+        root.addEventListener('click', e => {
+            if (e.target.closest('.bid-icon, .bid-wrap, .bid.btn, .bid-wrap .torn-btn')) {
+                scheduleBidPanelScan();
+                setTimeout(scheduleBidPanelScan, 120);
+                setTimeout(scheduleBidPanelScan, 350);
+            }
+        }, true);
+
+        if (state.bidPanelObserver) return;
+        state.bidPanelObserver = new MutationObserver(mutations => {
+            if (state.observersPaused) return;
+            for (const m of mutations) {
+                if (shouldIgnoreMutation(m)) continue;
+                const target = m.target;
+                if (!(target instanceof Element)) continue;
+                if (m.type === 'attributes' && target.classList.contains('confirm')) {
+                    scheduleBidPanelScan();
+                    return;
+                }
+                if (m.type === 'attributes' && target.tagName === 'LI' && m.attributeName === 'class') {
+                    scheduleBidPanelScan();
+                    return;
+                }
+                if (m.type === 'childList' && (
+                    target.classList.contains('confirm') ||
+                    target.closest('.confirm') ||
+                    (m.addedNodes.length && Array.from(m.addedNodes).some(n =>
+                        n instanceof Element && (n.classList.contains('confirm') || n.querySelector('.confirm'))
+                    ))
+                )) {
+                    scheduleBidPanelScan();
+                    return;
+                }
+            }
+        });
+        state.bidPanelObserver.observe(root, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style', 'class']
+        });
+        log('bid panel observer attached');
     }
 
     // ---------- top bar ----------
@@ -1616,7 +1719,9 @@
             el.textContent = 'Catalog API failed: ' + state.itemCatalogError + ' — using iteminfo.php per row instead';
             el.style.color = '#fbbf24';
         } else if (!getApiKey()) {
-            el.textContent = 'No API key — categories load per row via iteminfo.php (item ID on each row)';
+            el.textContent = state.isPDA
+                ? 'Set API key in Torn PDA script settings (Public access is enough)'
+                : 'No API key — categories load per row via iteminfo.php (item ID on each row)';
             el.style.color = '#9ca3af';
         } else {
             el.textContent = 'Catalog empty — categories load per row via iteminfo.php';
@@ -1665,7 +1770,9 @@
 
         const panel = document.createElement('div');
         panel.id = PREFIX + '-panel';
-        panel.className = PREFIX + '-panel';
+        panel.className = PREFIX + '-panel' + (state.isPDA ? ' ' + PREFIX + '-pda' : '');
+        const apiBtnHtml = state.isPDA ? '' :
+            '<button type="button" class="' + PREFIX + '-btn" id="' + PREFIX + '-api-btn" title="Set Torn API key for weapon category detection">API Key</button>';
         panel.innerHTML =
             '<div id="' + PREFIX + '-controls" class="' + PREFIX + '-controls">' +
                 '<div class="' + PREFIX + '-field">' +
@@ -1676,7 +1783,7 @@
                     '</div>' +
                 '</div>' +
                 '<button type="button" class="' + PREFIX + '-btn" id="' + PREFIX + '-tables-btn">Tables</button>' +
-                '<button type="button" class="' + PREFIX + '-btn" id="' + PREFIX + '-api-btn" title="Set Torn API key for weapon category detection">API Key</button>' +
+                apiBtnHtml +
                 '<div class="' + PREFIX + '-preview" id="' + PREFIX + '-preview"></div>' +
                 '<div class="' + PREFIX + '-preview" id="' + PREFIX + '-catalog-status"></div>' +
                 brandFooterHtml() +
@@ -1722,27 +1829,30 @@
         });
 
         document.getElementById(PREFIX + '-tables-btn').addEventListener('click', openTablesModal);
-        document.getElementById(PREFIX + '-api-btn').addEventListener('click', async e => {
-            e.preventDefault();
-            e.stopPropagation();
-            const key = await promptForApiKeyModal();
-            if (key) {
-                clearFailedCategoryLookups();
-                state.itemCatalogLoaded = false;
-                state.itemCatalog = {};
-                state.itemCatalogLoading = null;
-                state.itemCatalogError = null;
-                await loadItemCatalog(true);
-                updateCatalogStatus();
-                scheduleRefresh();
-            }
-        });
+        const apiBtn = document.getElementById(PREFIX + '-api-btn');
+        if (apiBtn) {
+            apiBtn.addEventListener('click', async e => {
+                e.preventDefault();
+                e.stopPropagation();
+                const key = await promptForApiKeyModal();
+                if (key) {
+                    clearFailedCategoryLookups();
+                    state.itemCatalogLoaded = false;
+                    state.itemCatalog = {};
+                    state.itemCatalogLoading = null;
+                    state.itemCatalogError = null;
+                    await loadItemCatalog(true);
+                    updateCatalogStatus();
+                    scheduleRefresh();
+                }
+            });
+        }
         updatePreview();
         updateCatalogStatus();
 
         const tabs = document.querySelector('#auction-house-tabs');
         if (tabs) {
-            tabs.addEventListener('click', () => scheduleRefresh());
+            tabs.addEventListener('click', () => scheduleTabRefresh());
         }
 
         log('top bar injected');
@@ -1785,6 +1895,7 @@
         if (!root || state.listObserver) return;
 
         state.listObserver = new MutationObserver(mutations => {
+            if (state.observersPaused) return;
             let relevant = false;
             for (const m of mutations) {
                 if (shouldIgnoreMutation(m)) continue;
@@ -1804,6 +1915,7 @@
         if (!root || state.infoObserver) return;
 
         state.infoObserver = new MutationObserver(mutations => {
+            if (state.observersPaused) return;
             let relevant = false;
             for (const m of mutations) {
                 if (shouldIgnoreMutation(m)) continue;
@@ -1834,12 +1946,15 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.3.9', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.4.0', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
+            state.isPDA = await checkTornPDA();
+            log('environment', { isPDA: state.isPDA, hasApiKey: !!getApiKey() });
             ensureTopBar();
             observeAuctionList();
             observeItemInfoExpansion();
+            observeBidPanels();
             await ensureApiKey();
             await loadItemCatalog(false);
             updateCatalogStatus();
