@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.4.1
+// @version      1.4.2
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -94,11 +94,13 @@
         infoObserver: null,
         refreshTimer: null,
         refreshInFlight: false,
+        refreshPending: false,
         topBarObserver: null,
         bidPanelObserver: null,
         bidPanelBound: false,
         bidScanTimer: null,
         tabRefreshTimer: null,
+        tabFollowUpTimers: [],
         tabQuietUntil: 0,
         observersPaused: false,
         isPDA: false,
@@ -1410,12 +1412,26 @@
 
         if (!rowInfo.category) {
             const hint = getOrCreateDesktopHint(li);
-            if (!hint) return;
-            const pendingHtml = '<span class="' + PREFIX + '-hint-line">Max: loading...</span>';
-            const pendingCls = PREFIX + '-desk-hint ' + PREFIX + '-hint pending';
-            if (hint.innerHTML !== pendingHtml || hint.className !== pendingCls) {
-                hint.innerHTML = pendingHtml;
-                hint.className = pendingCls;
+            if (hint) {
+                const pendingHtml = '<span class="' + PREFIX + '-hint-line">Max: loading...</span>';
+                const pendingCls = PREFIX + '-desk-hint ' + PREFIX + '-hint pending';
+                if (hint.innerHTML !== pendingHtml || hint.className !== pendingCls) {
+                    hint.innerHTML = pendingHtml;
+                    hint.className = pendingCls;
+                }
+            }
+            if (mobBid) {
+                const mobText = 'Max: loading...';
+                const mobCls = PREFIX + '-mob-hint ' + PREFIX + '-hint pending';
+                let mh = li.querySelector('.' + PREFIX + '-mob-hint');
+                if (!mh) {
+                    mh = document.createElement('div');
+                    mobBid.insertAdjacentElement('afterend', mh);
+                }
+                if (mh.textContent !== mobText || mh.className !== mobCls) {
+                    mh.textContent = mobText;
+                    mh.className = mobCls;
+                }
             }
             return;
         }
@@ -1509,7 +1525,10 @@
     }
 
     async function refreshAllRows() {
-        if (state.refreshInFlight) return;
+        if (state.refreshInFlight) {
+            state.refreshPending = true;
+            return;
+        }
         state.refreshInFlight = true;
         const wasPaused = state.observersPaused;
         if (!wasPaused) pauseListObservers();
@@ -1523,7 +1542,16 @@
             if (!wasPaused && (!state.tabQuietUntil || Date.now() >= state.tabQuietUntil)) {
                 resumeListObservers();
             }
+            if (state.refreshPending) {
+                state.refreshPending = false;
+                scheduleRefresh(80);
+            }
         }
+    }
+
+    function clearTabFollowUpTimers() {
+        state.tabFollowUpTimers.forEach(t => clearTimeout(t));
+        state.tabFollowUpTimers = [];
     }
 
     function scheduleRefresh(delayMs) {
@@ -1536,18 +1564,21 @@
     }
 
     function scheduleTabRefresh() {
+        clearTabFollowUpTimers();
         if (state.tabRefreshTimer) clearTimeout(state.tabRefreshTimer);
-        pauseListObservers();
-        state.tabQuietUntil = Date.now() + (state.isPDA ? 4000 : 1500);
-        state.tabRefreshTimer = setTimeout(async () => {
-            state.tabRefreshTimer = null;
-            await refreshAllRows();
-            if (state.isPDA) {
-                setTimeout(resumeListObservers, 2500);
-            } else {
-                resumeListObservers();
-            }
-        }, state.isPDA ? 650 : 350);
+        state.tabQuietUntil = Date.now() + (state.isPDA ? 4500 : 1500);
+
+        const delays = state.isPDA ? [500, 1100, 2000, 3500] : [350];
+        delays.forEach(ms => {
+            state.tabFollowUpTimers.push(setTimeout(() => {
+                refreshAllRows();
+            }, ms));
+        });
+
+        state.tabFollowUpTimers.push(setTimeout(() => {
+            state.tabQuietUntil = 0;
+            resumeListObservers();
+        }, state.isPDA ? 4500 : 1500));
     }
 
     // ---------- bid panel ----------
@@ -1938,16 +1969,25 @@
 
         state.listObserver = new MutationObserver(mutations => {
             if (state.observersPaused) return;
-            if (state.tabQuietUntil && Date.now() < state.tabQuietUntil) return;
+            let structural = false;
             let relevant = false;
             for (const m of mutations) {
                 if (shouldIgnoreMutation(m)) continue;
                 if (m.type !== 'childList') continue;
-                if (state.isPDA && !isStructuralListChange(m)) continue;
-                relevant = true;
-                break;
+                if (isStructuralListChange(m)) {
+                    structural = true;
+                    relevant = true;
+                    break;
+                }
+                if (!state.isPDA) relevant = true;
             }
-            if (relevant) scheduleRefresh();
+            if (!relevant) return;
+            if (state.tabQuietUntil && Date.now() < state.tabQuietUntil) {
+                if (!structural) return;
+                scheduleRefresh(state.isPDA ? 300 : 150);
+                return;
+            }
+            scheduleRefresh();
         });
         state.listObserver.observe(root, { childList: true, subtree: true });
         log('list observer attached');
@@ -1989,7 +2029,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.4.1', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.4.2', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             state.isPDA = await checkTornPDA();
