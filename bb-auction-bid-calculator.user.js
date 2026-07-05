@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.3.7
+// @version      1.3.8
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -885,16 +885,16 @@
                 margin:0; padding:10px 18px 12px; border-top:1px solid rgba(255,255,255,.06);
                 text-align:center; flex-shrink:0;
             }
-            ul.items-list > li .c-bid-wrap.${PREFIX}-bid-anchor{
-                position:relative; vertical-align:top; overflow:visible;
+            ul.items-list > li > .${PREFIX}-hint-wrap{
+                display:table-cell; vertical-align:middle;
+                width:5.2em; min-width:4.6em; max-width:6.5em;
+                padding:0 6px; text-align:center; box-sizing:border-box;
             }
-            ul.items-list > li .c-bid-wrap .${PREFIX}-desk-hint{
-                position:absolute; top:100%; right:0; margin-top:2px;
-                width:max-content; min-width:5em; max-width:7.5em;
+            ul.items-list > li > .${PREFIX}-hint-wrap .${PREFIX}-desk-hint{
+                display:block; width:100%; max-width:6.5em; margin:0 auto;
                 font-size:9px; font-weight:700; line-height:1.3;
-                padding:3px 5px; border-radius:4px; text-align:center;
+                padding:4px 5px; border-radius:4px; text-align:center;
                 white-space:normal; word-break:break-word; box-sizing:border-box;
-                z-index:2; pointer-events:none;
             }
             .${PREFIX}-hint{
                 display:block; font-size:9px; font-weight:700; line-height:1.3;
@@ -1039,8 +1039,7 @@
             }
             .${PREFIX}-note{ margin-top:12px; font-size:12px; color:#9ca3af; line-height:1.5; }
             @media (max-width:784px){
-                ul.items-list > li .c-bid-wrap .${PREFIX}-desk-hint{ display:none !important; }
-                ul.items-list > li .c-bid-wrap.${PREFIX}-bid-anchor{ position:static; }
+                ul.items-list > li > .${PREFIX}-hint-wrap{ display:none !important; }
                 .${PREFIX}-mob-hint{ display:block; }
             }
             @media (min-width:785px){
@@ -1330,20 +1329,31 @@
     }
 
     function getOrCreateDesktopHint(li) {
-        const bidWrap = li.querySelector('.c-bid-wrap');
-        if (!bidWrap) return null;
+        let col = li.querySelector(':scope > .' + PREFIX + '-hint-wrap');
+        if (!col) {
+            col = document.createElement('div');
+            col.className = PREFIX + '-hint-wrap';
+            const bidsWrap = li.querySelector('.bids-wrap');
+            if (bidsWrap) {
+                bidsWrap.insertAdjacentElement('beforebegin', col);
+            } else {
+                const sellerWrap = li.querySelector('.seller-wrap');
+                if (!sellerWrap) return null;
+                sellerWrap.insertAdjacentElement('afterend', col);
+            }
+        }
 
-        bidWrap.classList.add(PREFIX + '-bid-anchor');
-        let hint = bidWrap.querySelector('.' + PREFIX + '-desk-hint');
+        let hint = col.querySelector('.' + PREFIX + '-desk-hint');
         if (!hint) {
             hint = document.createElement('div');
             hint.className = PREFIX + '-desk-hint ' + PREFIX + '-hint pending';
-            bidWrap.appendChild(hint);
+            col.appendChild(hint);
         }
         return hint;
     }
 
     function removeRowHint(li) {
+        li.querySelectorAll(':scope > .' + PREFIX + '-hint-wrap').forEach(n => n.remove());
         const bidWrap = li.querySelector('.c-bid-wrap');
         if (bidWrap) {
             bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
@@ -1428,6 +1438,10 @@
             bidsWrap.classList.remove(PREFIX + '-bids-stack');
         }
         li.querySelectorAll(':scope > .' + PREFIX + '-desk-hint').forEach(n => n.remove());
+        if (bidWrap) {
+            bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
+            bidWrap.classList.remove(PREFIX + '-bid-anchor');
+        }
     }
 
     function cleanupLegacyControls() {
@@ -1749,6 +1763,7 @@
             target.classList.contains(PREFIX + '-mob-hint') ||
             target.classList.contains(PREFIX + '-bid-actions')
         )) return true;
+        if (target.closest('.' + PREFIX + '-hint-wrap')) return true;
         if (target.closest('.' + PREFIX + '-hint') || target.closest('.' + PREFIX + '-desk-hint') || target.closest('.' + PREFIX + '-bid-actions')) return true;
         return false;
     }
@@ -1807,7 +1822,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.3.7', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.3.8', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             ensureTopBar();
