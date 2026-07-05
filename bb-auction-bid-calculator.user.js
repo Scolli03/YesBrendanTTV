@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.4.3
+// @version      1.4.4
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -1395,18 +1395,13 @@
         migrateDesktopHintAnchor(li);
         const bidsWrap = li.querySelector('.bids-wrap');
         if (bidsWrap) {
-            bidsWrap.querySelectorAll('.' + PREFIX + '-hint-wrap').forEach(n => n.remove());
-            bidsWrap.classList.remove(PREFIX + '-bids-hint-anchor');
+            bidsWrap.querySelectorAll('.' + PREFIX + '-hint-wrap, .' + PREFIX + '-desk-hint').forEach(n => n.remove());
+            bidsWrap.classList.remove(PREFIX + '-bids-hint-anchor', PREFIX + '-bids-stack');
         }
         const bidWrap = li.querySelector('.c-bid-wrap');
         if (bidWrap) {
             bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
             bidWrap.classList.remove(PREFIX + '-bid-anchor');
-        }
-        const bidsWrap = li.querySelector('.bids-wrap');
-        if (bidsWrap) {
-            bidsWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
-            bidsWrap.classList.remove(PREFIX + '-bids-stack');
         }
         li.querySelectorAll(':scope > .' + PREFIX + '-desk-hint').forEach(n => n.remove());
         const mobHint = li.querySelector('.' + PREFIX + '-mob-hint');
@@ -2040,7 +2035,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.4.3', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.4.4', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             state.isPDA = await checkTornPDA();
