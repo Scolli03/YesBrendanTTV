@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.4.4
+// @version      1.4.5
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -248,7 +248,9 @@
 
     function promptForApiKeyModal() {
         return new Promise(resolve => {
+            closeModal();
             const overlay = document.createElement('div');
+            overlay.id = PREFIX + '-overlay';
             overlay.className = PREFIX + '-overlay';
             overlay.innerHTML =
                 '<div class="' + PREFIX + '-modal ' + PREFIX + '-modal-api" role="dialog" aria-modal="true">' +
@@ -262,8 +264,8 @@
                             '<button type="button" class="' + PREFIX + '-btn primary" data-action="save">Save</button>' +
                         '</div>' +
                     '</div>' +
-                '</div>' +
-                brandFooterHtml();
+                    brandFooterHtml() +
+                '</div>';
 
             const finish = val => {
                 overlay.remove();
@@ -285,6 +287,8 @@
             overlay.addEventListener('click', e => {
                 if (e.target === overlay) finish(null);
             });
+            const modal = overlay.querySelector('.' + PREFIX + '-modal');
+            if (modal) modal.addEventListener('click', e => e.stopPropagation());
             document.body.style.overflow = 'hidden';
             document.body.appendChild(overlay);
             const input = overlay.querySelector('#' + PREFIX + '-api-key-input');
