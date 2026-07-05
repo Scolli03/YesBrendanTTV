@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.3.5
+// @version      1.3.6
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -243,6 +243,7 @@
 
             const finish = val => {
                 overlay.remove();
+                document.body.style.overflow = '';
                 resolve(val);
             };
 
@@ -260,6 +261,7 @@
             overlay.addEventListener('click', e => {
                 if (e.target === overlay) finish(null);
             });
+            document.body.style.overflow = 'hidden';
             document.body.appendChild(overlay);
             const input = overlay.querySelector('#' + PREFIX + '-api-key-input');
             if (input) input.focus();
@@ -883,15 +885,16 @@
                 margin:0; padding:10px 18px 12px; border-top:1px solid rgba(255,255,255,.06);
                 text-align:center; flex-shrink:0;
             }
-            ul.items-list > li .bids-wrap.${PREFIX}-bids-stack{
-                display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
-                gap:5px; vertical-align:top; min-width:5.5em;
+            ul.items-list > li .c-bid-wrap.${PREFIX}-bid-anchor{
+                position:relative; vertical-align:top; overflow:visible;
             }
-            ul.items-list > li .bids-wrap .${PREFIX}-desk-hint{
-                display:block; font-size:9px; font-weight:700; line-height:1.3;
-                padding:4px 5px; border-radius:4px; text-align:center;
-                white-space:normal; word-break:break-word; width:100%; max-width:7.5em;
-                box-sizing:border-box;
+            ul.items-list > li .c-bid-wrap .${PREFIX}-desk-hint{
+                position:absolute; top:100%; right:0; margin-top:2px;
+                width:max-content; min-width:5em; max-width:7.5em;
+                font-size:9px; font-weight:700; line-height:1.3;
+                padding:3px 5px; border-radius:4px; text-align:center;
+                white-space:normal; word-break:break-word; box-sizing:border-box;
+                z-index:2; pointer-events:none;
             }
             .${PREFIX}-hint{
                 display:block; font-size:9px; font-weight:700; line-height:1.3;
@@ -934,7 +937,14 @@
                 display:flex; justify-content:space-between; align-items:center; gap:12px;
                 padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.08);
             }
-            .${PREFIX}-modal-head h2{ margin:0; font-size:16px; color:#f3f4f6; flex:1; min-width:0; }
+            .${PREFIX}-modal-head .${PREFIX}-btn,
+            .${PREFIX}-modal-close{
+                width:auto; flex-shrink:0; white-space:nowrap; padding:6px 12px;
+            }
+            .${PREFIX}-modal-head h2{
+                margin:0; font-size:15px; color:#f3f4f6; flex:1; min-width:0;
+                line-height:1.25;
+            }
             .${PREFIX}-modal-body{
                 padding:16px 18px; overflow:auto; overflow-x:hidden; color:#e5e7eb; line-height:1.55;
             }
@@ -1018,22 +1028,20 @@
             }
             .${PREFIX}-note{ margin-top:12px; font-size:12px; color:#9ca3af; line-height:1.5; }
             @media (max-width:784px){
-                ul.items-list > li .bids-wrap .${PREFIX}-desk-hint{ display:none !important; }
-                ul.items-list > li .bids-wrap.${PREFIX}-bids-stack{ min-width:0; }
+                ul.items-list > li .c-bid-wrap .${PREFIX}-desk-hint{ display:none !important; }
+                ul.items-list > li .c-bid-wrap.${PREFIX}-bid-anchor{ position:static; }
                 .${PREFIX}-mob-hint{ display:block; }
             }
             @media (min-width:785px){
                 ul.items-list > li .${PREFIX}-mob-hint{ display:none !important; }
             }
             @media (max-width:900px){
+                .${PREFIX}-controls .${PREFIX}-btn{ width:100%; text-align:center; }
                 .${PREFIX}-controls{ flex-direction:column; align-items:stretch; }
                 .${PREFIX}-field,.${PREFIX}-money-wrap input{ width:100%; min-width:0; }
-                .${PREFIX}-btn{ width:100%; text-align:center; }
                 .${PREFIX}-bid-actions{ display:flex; flex-wrap:wrap; margin:8px 0 0; }
-                .${PREFIX}-overlay{ padding:10px; align-items:flex-end; }
-                .${PREFIX}-modal{
-                    max-height:88vh; border-bottom-left-radius:0; border-bottom-right-radius:0;
-                }
+                .${PREFIX}-overlay{ padding:12px; align-items:center; justify-content:center; }
+                .${PREFIX}-modal{ max-height:88vh; border-radius:12px; }
                 .${PREFIX}-modal-tables{ max-width:100%; }
                 .${PREFIX}-table{ min-width:480px; font-size:11px; }
                 .${PREFIX}-table th.${PREFIX}-th-cat,.${PREFIX}-table td.${PREFIX}-td-cat{
@@ -1052,6 +1060,7 @@
     function closeModal() {
         const el = document.getElementById(PREFIX + '-overlay');
         if (el) el.remove();
+        document.body.style.overflow = '';
     }
 
     function openModal(title, bodyHtml, modalClass) {
@@ -1064,7 +1073,7 @@
             '<div class="' + modalCls + '" role="dialog" aria-modal="true">' +
                 '<div class="' + PREFIX + '-modal-head">' +
                     '<h2>' + title + '</h2>' +
-                    '<button type="button" class="' + PREFIX + '-btn" data-action="close">Close</button>' +
+                    '<button type="button" class="' + PREFIX + '-btn ' + PREFIX + '-modal-close" data-action="close">Close</button>' +
                 '</div>' +
                 '<div class="' + PREFIX + '-modal-body">' + bodyHtml + '</div>' +
                 brandFooterHtml() +
@@ -1086,6 +1095,7 @@
             });
         }
 
+        document.body.style.overflow = 'hidden';
         document.body.appendChild(overlay);
         log('modal opened', title);
         return overlay;
@@ -1309,25 +1319,31 @@
     }
 
     function getOrCreateDesktopHint(li) {
-        const bidsWrap = li.querySelector('.bids-wrap');
-        if (!bidsWrap) return null;
+        const bidWrap = li.querySelector('.c-bid-wrap');
+        if (!bidWrap) return null;
 
-        bidsWrap.classList.add(PREFIX + '-bids-stack');
-        let hint = bidsWrap.querySelector('.' + PREFIX + '-desk-hint');
+        bidWrap.classList.add(PREFIX + '-bid-anchor');
+        let hint = bidWrap.querySelector('.' + PREFIX + '-desk-hint');
         if (!hint) {
             hint = document.createElement('div');
             hint.className = PREFIX + '-desk-hint ' + PREFIX + '-hint pending';
-            bidsWrap.appendChild(hint);
+            bidWrap.appendChild(hint);
         }
         return hint;
     }
 
     function removeRowHint(li) {
+        const bidWrap = li.querySelector('.c-bid-wrap');
+        if (bidWrap) {
+            bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
+            bidWrap.classList.remove(PREFIX + '-bid-anchor');
+        }
         const bidsWrap = li.querySelector('.bids-wrap');
         if (bidsWrap) {
             bidsWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
             bidsWrap.classList.remove(PREFIX + '-bids-stack');
         }
+        li.querySelectorAll(':scope > .' + PREFIX + '-desk-hint').forEach(n => n.remove());
         const mobHint = li.querySelector('.' + PREFIX + '-mob-hint');
         if (mobHint) mobHint.remove();
     }
@@ -1386,16 +1402,21 @@
 
     function cleanupLegacyBidWrap(li) {
         const bidWrap = li.querySelector('.c-bid-wrap');
-        if (!bidWrap) return;
-        const inner = bidWrap.querySelector('.' + PREFIX + '-bid-inner');
-        if (!inner) {
+        if (bidWrap) {
+            const inner = bidWrap.querySelector('.' + PREFIX + '-bid-inner');
+            if (inner) {
+                const amountEl = inner.querySelector('.' + PREFIX + '-bid-amount');
+                bidWrap.textContent = amountEl ? amountEl.textContent.trim() : inner.textContent.trim();
+            }
             bidWrap.querySelectorAll('.' + PREFIX + '-row-hint').forEach(n => n.remove());
             bidWrap.classList.remove(PREFIX + '-bid-stack');
-            return;
         }
-        const amountEl = inner.querySelector('.' + PREFIX + '-bid-amount');
-        bidWrap.textContent = amountEl ? amountEl.textContent.trim() : inner.textContent.trim();
-        bidWrap.classList.remove(PREFIX + '-bid-stack');
+        const bidsWrap = li.querySelector('.bids-wrap');
+        if (bidsWrap) {
+            bidsWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
+            bidsWrap.classList.remove(PREFIX + '-bids-stack');
+        }
+        li.querySelectorAll(':scope > .' + PREFIX + '-desk-hint').forEach(n => n.remove());
     }
 
     function cleanupLegacyControls() {
@@ -1775,7 +1796,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.3.5', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.3.6', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             ensureTopBar();
