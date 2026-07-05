@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.3.8
+// @version      1.3.9
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -885,13 +885,16 @@
                 margin:0; padding:10px 18px 12px; border-top:1px solid rgba(255,255,255,.06);
                 text-align:center; flex-shrink:0;
             }
-            ul.items-list > li > .${PREFIX}-hint-wrap{
-                display:table-cell; vertical-align:middle;
-                width:5.2em; min-width:4.6em; max-width:6.5em;
-                padding:0 6px; text-align:center; box-sizing:border-box;
+            ul.items-list > li .seller-wrap.${PREFIX}-seller-hint-anchor{
+                position:relative; overflow:visible;
             }
-            ul.items-list > li > .${PREFIX}-hint-wrap .${PREFIX}-desk-hint{
-                display:block; width:100%; max-width:6.5em; margin:0 auto;
+            ul.items-list > li .seller-wrap > .${PREFIX}-hint-wrap{
+                position:absolute; left:100%; top:50%;
+                transform:translateY(-50%); margin-left:6px;
+                width:5.2em; z-index:1; pointer-events:none;
+            }
+            ul.items-list > li .seller-wrap .${PREFIX}-desk-hint{
+                display:block; width:100%;
                 font-size:9px; font-weight:700; line-height:1.3;
                 padding:4px 5px; border-radius:4px; text-align:center;
                 white-space:normal; word-break:break-word; box-sizing:border-box;
@@ -1039,6 +1042,7 @@
             }
             .${PREFIX}-note{ margin-top:12px; font-size:12px; color:#9ca3af; line-height:1.5; }
             @media (max-width:784px){
+                ul.items-list > li .seller-wrap > .${PREFIX}-hint-wrap{ display:none !important; }
                 ul.items-list > li > .${PREFIX}-hint-wrap{ display:none !important; }
                 .${PREFIX}-mob-hint{ display:block; }
             }
@@ -1329,31 +1333,33 @@
     }
 
     function getOrCreateDesktopHint(li) {
-        let col = li.querySelector(':scope > .' + PREFIX + '-hint-wrap');
-        if (!col) {
-            col = document.createElement('div');
-            col.className = PREFIX + '-hint-wrap';
-            const bidsWrap = li.querySelector('.bids-wrap');
-            if (bidsWrap) {
-                bidsWrap.insertAdjacentElement('beforebegin', col);
-            } else {
-                const sellerWrap = li.querySelector('.seller-wrap');
-                if (!sellerWrap) return null;
-                sellerWrap.insertAdjacentElement('afterend', col);
-            }
+        const sellerWrap = li.querySelector('.seller-wrap');
+        if (!sellerWrap) return null;
+
+        sellerWrap.classList.add(PREFIX + '-seller-hint-anchor');
+        let wrap = sellerWrap.querySelector('.' + PREFIX + '-hint-wrap');
+        if (!wrap) {
+            wrap = document.createElement('div');
+            wrap.className = PREFIX + '-hint-wrap';
+            sellerWrap.appendChild(wrap);
         }
 
-        let hint = col.querySelector('.' + PREFIX + '-desk-hint');
+        let hint = wrap.querySelector('.' + PREFIX + '-desk-hint');
         if (!hint) {
             hint = document.createElement('div');
             hint.className = PREFIX + '-desk-hint ' + PREFIX + '-hint pending';
-            col.appendChild(hint);
+            wrap.appendChild(hint);
         }
         return hint;
     }
 
     function removeRowHint(li) {
         li.querySelectorAll(':scope > .' + PREFIX + '-hint-wrap').forEach(n => n.remove());
+        const sellerWrap = li.querySelector('.seller-wrap');
+        if (sellerWrap) {
+            sellerWrap.querySelectorAll('.' + PREFIX + '-hint-wrap').forEach(n => n.remove());
+            sellerWrap.classList.remove(PREFIX + '-seller-hint-anchor');
+        }
         const bidWrap = li.querySelector('.c-bid-wrap');
         if (bidWrap) {
             bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
@@ -1822,7 +1828,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.3.8', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.3.9', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             ensureTopBar();
