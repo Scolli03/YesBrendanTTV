@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.4.5
+// @version      1.5.0
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -242,6 +242,10 @@
         return null;
     }
 
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     function saveApiKey(key) {
         storeSet(SK.apiKey, String(key || '').trim());
     }
@@ -296,15 +300,165 @@
         });
     }
 
-    async function ensureApiKey() {
+    function promptInitialSetupModal() {
+        return new Promise(resolve => {
+            closeModal();
+            const savedPrice = storeGet(SK.pricePerBB, null);
+            const overlay = document.createElement('div');
+            overlay.id = PREFIX + '-overlay';
+            overlay.className = PREFIX + '-overlay';
+            overlay.innerHTML =
+                '<div class="' + PREFIX + '-modal ' + PREFIX + '-modal-setup" role="dialog" aria-modal="true">' +
+                    '<div class="' + PREFIX + '-modal-head"><h2>Quick setup</h2></div>' +
+                    '<div class="' + PREFIX + '-modal-body">' +
+                        '<p class="' + PREFIX + '-modal-copy">Set your price per bunker buck and optionally a Torn API key. After you continue we load the weapon catalog and refresh the page so max bids show correctly.</p>' +
+                        '<label class="' + PREFIX + '-field-label" for="' + PREFIX + '-setup-price">Price per BB</label>' +
+                        '<div class="' + PREFIX + '-money-wrap ' + PREFIX + '-setup-price-wrap">' +
+                            '<span class="' + PREFIX + '-sym">$</span>' +
+                            '<input type="text" id="' + PREFIX + '-setup-price" placeholder="5.7m" autocomplete="off" spellcheck="false">' +
+                        '</div>' +
+                        '<label class="' + PREFIX + '-field-label" for="' + PREFIX + '-setup-api-key">API key (optional)</label>' +
+                        '<input type="password" id="' + PREFIX + '-setup-api-key" class="' + PREFIX + '-text-input" placeholder="Public access key" autocomplete="off">' +
+                        '<p class="' + PREFIX + '-modal-copy ' + PREFIX + '-modal-copy-tight">A <b>Public</b> access key is enough. Stored only in this browser.</p>' +
+                        '<div class="' + PREFIX + '-modal-actions">' +
+                            '<button type="button" class="' + PREFIX + '-btn" data-action="skip">Skip for now</button>' +
+                            '<button type="button" class="' + PREFIX + '-btn primary" data-action="continue">Continue</button>' +
+                        '</div>' +
+                    '</div>' +
+                    brandFooterHtml() +
+                '</div>';
+
+            const priceInput = overlay.querySelector('#' + PREFIX + '-setup-price');
+            const apiInput = overlay.querySelector('#' + PREFIX + '-setup-api-key');
+            if (savedPrice && priceInput) {
+                priceInput.value = formatPriceInputDisplay(savedPrice);
+            }
+
+            const finish = result => {
+                overlay.remove();
+                document.body.style.overflow = '';
+                resolve(result);
+            };
+
+            overlay.querySelector('[data-action="skip"]').addEventListener('click', () => finish(null));
+            overlay.querySelector('[data-action="continue"]').addEventListener('click', () => {
+                const priceRaw = priceInput && priceInput.value;
+                const pricePerBB = parseMoney(priceRaw);
+                if (!pricePerBB) {
+                    if (priceInput) priceInput.focus();
+                    return;
+                }
+                const apiKey = apiInput && apiInput.value.trim() ? apiInput.value.trim() : null;
+                finish({ pricePerBB, apiKey });
+            });
+            overlay.addEventListener('click', e => {
+                if (e.target === overlay) finish(null);
+            });
+            const modal = overlay.querySelector('.' + PREFIX + '-modal');
+            if (modal) modal.addEventListener('click', e => e.stopPropagation());
+            document.body.style.overflow = 'hidden';
+            document.body.appendChild(overlay);
+            if (priceInput) priceInput.focus();
+        });
+    }
+
+    function showSetupProgressOverlay(title) {
+        closeModal();
+        const overlay = document.createElement('div');
+        overlay.id = PREFIX + '-overlay';
+        overlay.className = PREFIX + '-overlay';
+        overlay.innerHTML =
+            '<div class="' + PREFIX + '-modal ' + PREFIX + '-modal-setup" role="dialog" aria-modal="true">' +
+                '<div class="' + PREFIX + '-modal-head"><h2>' + (title || 'Setting up') + '</h2></div>' +
+                '<div class="' + PREFIX + '-modal-body ' + PREFIX + '-setup-progress">' +
+                    '<div class="' + PREFIX + '-spinner" aria-hidden="true"></div>' +
+                    '<p class="' + PREFIX + '-setup-status" id="' + PREFIX + '-setup-status">Please wait...</p>' +
+                    '<p class="' + PREFIX + '-setup-detail" id="' + PREFIX + '-setup-detail"></p>' +
+                '</div>' +
+                brandFooterHtml() +
+            '</div>';
+        document.body.style.overflow = 'hidden';
+        document.body.appendChild(overlay);
+        const statusEl = overlay.querySelector('#' + PREFIX + '-setup-status');
+        const detailEl = overlay.querySelector('#' + PREFIX + '-setup-detail');
+        return {
+            setStatus(msg) {
+                if (statusEl) statusEl.textContent = msg || '';
+            },
+            setDetail(msg) {
+                if (detailEl) detailEl.textContent = msg || '';
+            },
+            close() {
+                closeModal();
+            }
+        };
+    }
+
+    async function runInitialSetupFetch(apiKey, progress) {
+        progress.setStatus('Fetching weapon and armor catalog...');
+        progress.setDetail('This usually takes a few seconds.');
+        const map = await fetchItemCatalogFromApi(apiKey, msg => progress.setDetail(msg));
+        const count = Object.keys(map).length;
+        if (count >= CATALOG_MIN_ITEMS) {
+            storeSet(SK.itemCatalog, { map, fetchedAt: Date.now() });
+            progress.setStatus('Catalog loaded — ' + count + ' weapons and armor');
+            progress.setDetail('');
+            return true;
+        }
+        progress.setStatus('Catalog returned only ' + count + ' items');
+        progress.setDetail('Page will reload — categories will load per row instead.');
+        return false;
+    }
+
+    async function ensureInitialSetup() {
         if (state.isPDA) {
             return getApiKey();
         }
-        const existing = getApiKey();
-        if (existing) return existing;
-        if (storeGet(SK.apiKeyPrompted, false)) return null;
+        if (getApiKey()) {
+            return getApiKey();
+        }
+        if (storeGet(SK.apiKeyPrompted, false)) {
+            return null;
+        }
+
         storeSet(SK.apiKeyPrompted, true);
-        return promptForApiKeyModal();
+        const setup = await promptInitialSetupModal();
+        if (!setup) {
+            return null;
+        }
+
+        storeSet(SK.pricePerBB, setup.pricePerBB);
+        state.pricePerBB = setup.pricePerBB;
+        if (setup.apiKey) {
+            saveApiKey(setup.apiKey);
+        }
+
+        const progress = showSetupProgressOverlay('Setting up');
+        try {
+            if (setup.apiKey) {
+                try {
+                    await runInitialSetupFetch(setup.apiKey, progress);
+                } catch (err) {
+                    warn('initial catalog fetch failed', err);
+                    progress.setStatus('Catalog fetch failed');
+                    progress.setDetail(String(err.message || err) + ' — page will reload; categories load per row instead.');
+                    await delay(2500);
+                }
+            } else {
+                progress.setStatus('Saving your settings...');
+                progress.setDetail('No API key — categories will load per row when needed.');
+                await delay(800);
+            }
+            progress.setStatus('Reloading page...');
+            progress.setDetail('Max bid hints will appear after refresh.');
+            await delay(600);
+            location.reload();
+        } catch (err) {
+            warn('initial setup failed', err);
+            progress.close();
+        }
+
+        return setup.apiKey;
     }
 
     function tornRequest(url, asJson) {
@@ -371,12 +525,15 @@
         state.lastApiAt = Date.now();
     }
 
-    async function fetchV2ItemsByCategory(key, cat) {
+    async function fetchV2ItemsByCategory(key, cat, onProgress) {
         const map = {};
         let offset = 0;
         const limit = 1000;
         while (true) {
             await apiThrottle();
+            if (offset > 0 && onProgress) {
+                onProgress('Loading more ' + cat.toLowerCase() + ' (offset ' + offset + ')...');
+            }
             const data = await apiRequest(
                 'https://api.torn.com/v2/torn/items?cat=' + encodeURIComponent(cat) +
                 '&limit=' + limit + '&offset=' + offset + '&key=' + encodeURIComponent(key)
@@ -390,13 +547,19 @@
         return map;
     }
 
-    async function fetchItemCatalogFromApi(key) {
+    async function fetchItemCatalogFromApi(key, onProgress) {
+        const progress = msg => {
+            if (onProgress) onProgress(msg);
+        };
         const map = {};
         try {
-            for (const cat of CATALOG_V2_CATEGORIES) {
-                const batch = await fetchV2ItemsByCategory(key, cat);
+            for (let i = 0; i < CATALOG_V2_CATEGORIES.length; i++) {
+                const cat = CATALOG_V2_CATEGORIES[i];
+                const label = cat === 'Defensive' ? 'armor' : 'weapons';
+                progress('Step ' + (i + 1) + '/' + CATALOG_V2_CATEGORIES.length + ': loading ' + label + '...');
+                const batch = await fetchV2ItemsByCategory(key, cat, progress);
                 Object.assign(map, batch);
-                log('catalog category', cat, Object.keys(batch).length);
+                progress('Loaded ' + Object.keys(batch).length + ' ' + label + ' (' + Object.keys(map).length + ' total so far)');
             }
             const count = Object.keys(map).length;
             if (count >= CATALOG_MIN_ITEMS) {
@@ -967,6 +1130,18 @@
             .${PREFIX}-modal-tables{ max-width:min(720px,96vw); }
             .${PREFIX}-modal-narrow{ max-width:min(380px,92vw); }
             .${PREFIX}-modal-api{ max-width:min(360px,92vw); width:100%; }
+            .${PREFIX}-modal-setup{ max-width:min(400px,92vw); width:100%; }
+            .${PREFIX}-modal-copy-tight{ margin-top:-4px; margin-bottom:12px; font-size:12px; }
+            .${PREFIX}-setup-price-wrap{ margin-bottom:12px; }
+            .${PREFIX}-setup-progress{ text-align:center; padding-top:8px; padding-bottom:20px; }
+            .${PREFIX}-setup-status{ margin:0 0 8px; font-size:14px; font-weight:700; color:#f3f4f6; line-height:1.45; }
+            .${PREFIX}-setup-detail{ margin:0; font-size:12px; color:#9ca3af; line-height:1.5; min-height:1.5em; }
+            .${PREFIX}-spinner{
+                width:36px; height:36px; margin:0 auto 16px;
+                border:3px solid rgba(168,85,247,.25); border-top-color:#a855f7;
+                border-radius:50%; animation:${PREFIX}-spin .85s linear infinite;
+            }
+            @keyframes ${PREFIX}-spin{ to{ transform:rotate(360deg); } }
             .${PREFIX}-modal-head{
                 display:flex; justify-content:space-between; align-items:center; gap:12px;
                 padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.08);
@@ -2039,7 +2214,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.4.4', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.5.0', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             state.isPDA = await checkTornPDA();
@@ -2048,7 +2223,7 @@
             observeAuctionList();
             observeItemInfoExpansion();
             observeBidPanels();
-            await ensureApiKey();
+            await ensureInitialSetup();
             await loadItemCatalog(false);
             updateCatalogStatus();
             scheduleRefresh();
