@@ -1443,6 +1443,12 @@
             bidsWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
             bidsWrap.classList.remove(PREFIX + '-bids-stack');
         }
+        li.querySelectorAll(':scope > .' + PREFIX + '-hint-wrap').forEach(n => n.remove());
+        const sellerWrap = li.querySelector('.seller-wrap');
+        if (sellerWrap) {
+            sellerWrap.querySelectorAll('.' + PREFIX + '-hint-wrap').forEach(n => n.remove());
+            sellerWrap.classList.remove(PREFIX + '-seller-hint-anchor');
+        }
         li.querySelectorAll(':scope > .' + PREFIX + '-desk-hint').forEach(n => n.remove());
         if (bidWrap) {
             bidWrap.querySelectorAll('.' + PREFIX + '-desk-hint').forEach(n => n.remove());
