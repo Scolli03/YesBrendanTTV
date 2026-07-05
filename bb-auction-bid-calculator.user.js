@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BB Auction Bid Calculator
 // @namespace    tornjunkie.bbauction
-// @version      1.3.6
+// @version      1.3.7
 // @description  Set price per bunker buck on the auction house and get max bid values by weapon category and rarity
 // @author       Scolli03[3150751]
 // @updateURL    https://scriptserver.tornjunkie.com/?script=bbauction
@@ -970,18 +970,29 @@
                 color:#fff; border-color:rgba(236,72,153,.5);
                 background:linear-gradient(90deg,rgba(168,85,247,.35),rgba(236,72,153,.3));
             }
-            .${PREFIX}-scroll-wrap{ position:relative; max-width:100%; }
+            .${PREFIX}-scroll-wrap{
+                position:relative; max-width:100%;
+                border:1px solid rgba(255,255,255,.1); border-radius:8px;
+                padding:10px 12px 6px; background:rgba(0,0,0,.12);
+            }
             .${PREFIX}-scroll{
                 overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch;
-                margin:0 -2px; padding-bottom:2px;
+                margin:0; padding-bottom:16px; scrollbar-gutter:stable;
             }
             .${PREFIX}-table{
                 width:100%; border-collapse:separate; border-spacing:0; font-size:12px;
-                table-layout:auto; min-width:540px;
+                table-layout:auto; min-width:540px; margin-bottom:2px;
             }
             .${PREFIX}-table th,.${PREFIX}-table td{
-                padding:9px 8px; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:middle;
+                padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.08); vertical-align:middle;
             }
+            .${PREFIX}-table th:first-child,.${PREFIX}-table td:first-child{
+                padding-left:14px;
+            }
+            .${PREFIX}-table th:last-child,.${PREFIX}-table td:last-child{
+                padding-right:14px;
+            }
+            .${PREFIX}-table tbody tr:last-child td{ border-bottom:none; }
             .${PREFIX}-table th{
                 color:#e5e7eb; font-size:10px; text-transform:uppercase; letter-spacing:.35px;
                 background:rgba(0,0,0,.22); font-weight:700; white-space:nowrap;
@@ -1796,7 +1807,7 @@
         state.dollarTable = loadDollarTableFromStorage();
         injectStyles();
         loadCategoryCache();
-        log('init v1.3.6', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
+        log('init v1.3.7', { debug: state.debug, cachedCategories: Object.keys(state.categoryCache).length });
 
         const boot = async () => {
             ensureTopBar();
